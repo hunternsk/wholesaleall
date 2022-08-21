@@ -21,9 +21,10 @@ type configType struct {
 }
 
 type tradeJob struct {
-	From   string
-	To     string
-	Amount float64
+	From     string
+	To       string
+	Amount   float64
+	CrossJob *tradeJob
 }
 
 var (
@@ -74,7 +75,10 @@ func main() {
 	client := binance.NewClient(config.APIKey, config.SecretKey)
 	client.Debug = *debug
 
-	client.NewExchangeInfoService().Symbols()
+	exchangeInfo, err := client.NewExchangeInfoService().Do(ctx)
+	if err != nil {
+		log.Fatalln("error getting exchange info", err)
+	}
 
 	listenKey, err := client.NewStartUserStreamService().Do(ctx)
 	if err != nil {
@@ -92,19 +96,75 @@ func main() {
 	}()
 
 	// trader
-	tj := make(chan tradeJob)
-	go func(tj *chan tradeJob) {
+	tj := make(chan *tradeJob)
+	go func(tj chan *tradeJob) {
 		for {
 			select {
-			case t := <-*tj:
-				spew.Dump(t)
+			case t := <-tj:
+				//spew.Dump(t)
+				var orderService *binance.CreateOrderService
+				for _, s := range exchangeInfo.Symbols {
+					if s.Symbol == t.From+t.To {
+						orderService = client.NewCreateOrderService().
+							Symbol(s.Symbol).
+							Side(binance.SideTypeSell).
+							Type("MARKET").
+							Quantity(strconv.FormatFloat(t.Amount, 'f', 8, 64))
+						break
+					}
+					if s.Symbol == t.To+t.From {
+						orderService = client.NewCreateOrderService().
+							Symbol(s.Symbol).
+							Side(binance.SideTypeBuy).
+							Type("MARKET").
+							QuoteOrderQty(strconv.FormatFloat(t.Amount, 'f', 8, 64))
+						break
+					}
+				}
+				if orderService != nil {
+					//todo: check trade rules
+					//log.Println("trading")
+					res, err := orderService.Do(ctx)
+					if err != nil {
+						log.Println("create order error", err)
+						continue
+					}
+					//spew.Dump(res)
+					quoteQuantity, err := strconv.ParseFloat(res.CummulativeQuoteQuantity, 64)
+					if err != nil {
+						log.Println("res.CummulativeQuoteQuantity parse error", err)
+						return
+					}
+					log.Println("executed", res.Symbol, res.Side, quoteQuantity)
+					if t.CrossJob != nil {
+						log.Println("crossjob:", t.CrossJob, "trading")
+						go func() {
+							tj <- &tradeJob{
+								From:     "USDT",
+								To:       t.CrossJob.To,
+								Amount:   quoteQuantity,
+								CrossJob: nil,
+							}
+						}()
+					}
+					continue
+				}
 
+				log.Println("direct symbol not found, trading via usdt")
+				go func() {
+					tj <- &tradeJob{
+						From:     t.From,
+						To:       "USDT",
+						Amount:   t.Amount,
+						CrossJob: t,
+					}
+				}()
 			}
 		}
-	}(&tj)
+	}(tj)
 
 	wsHandler := func(e *binance.WsUserDataEvent) {
-		spew.Dump(e)
+		//spew.Dump(e)
 		if e.Event == "balanceUpdate" {
 			bu := e.BalanceUpdate
 			change, err := strconv.ParseFloat(bu.Change, 64)
@@ -124,7 +184,7 @@ func main() {
 			to := strings.ToUpper(config.SellAll[asset])
 			log.Println("trading balance update", bu.Change, bu.Asset, "to", to)
 
-			tj <- tradeJob{
+			tj <- &tradeJob{
 				From:   bu.Asset,
 				To:     to,
 				Amount: change,
