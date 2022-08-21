@@ -82,7 +82,7 @@ func main() {
 	}
 	go func() {
 		for {
-			time.Sleep(time.Minute * 5)
+			time.Sleep(time.Minute * 30)
 			log.Println("Pinging User Data Stream")
 			err := client.NewKeepaliveUserStreamService().ListenKey(listenKey).Do(ctx)
 			if err != nil {
