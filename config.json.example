@@ -1,0 +1,8 @@
+{
+  "api_key": "",
+  "secret_key": "",
+  "sell_all": {
+    "eth": "usdt",
+    "rvn": "etc"
+  }
+}
