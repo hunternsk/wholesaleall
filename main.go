@@ -7,6 +7,7 @@ import (
 	"github.com/adshao/go-binance/v2"
 	"github.com/davecgh/go-spew/spew"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,9 +16,9 @@ import (
 )
 
 type configType struct {
-	APIKey    string            `json:"api_key"`
-	SecretKey string            `json:"secret_key"`
-	SellAll   map[string]string `json:"sell_all"`
+	APIKey    string                        `json:"api_key"`
+	SecretKey string                        `json:"secret_key"`
+	SellAll   map[string]map[string]float64 `json:"sell_all"`
 }
 
 type tradeJob struct {
@@ -34,7 +35,7 @@ var (
 	config = configType{
 		APIKey:    "",
 		SecretKey: "",
-		SellAll:   map[string]string{"eth": "usdt"},
+		SellAll:   map[string]map[string]float64{"eth": {"usdt": 100}},
 	}
 )
 
@@ -90,7 +91,8 @@ func main() {
 			log.Println("Pinging User Data Stream")
 			err := client.NewKeepaliveUserStreamService().ListenKey(listenKey).Do(ctx)
 			if err != nil {
-				log.Fatalln(err)
+				log.Println(err)
+				time.Sleep(time.Minute)
 			}
 		}
 	}()
@@ -103,21 +105,38 @@ func main() {
 			case t := <-tj:
 				//spew.Dump(t)
 				var orderService *binance.CreateOrderService
+				getPrecision := func(s binance.Symbol) int {
+					p := 0
+					for _, f := range s.Filters {
+						if f["filterType"].(string) == "LOT_SIZE" {
+							stepSize := f["stepSize"].(string)
+							step, _ := strconv.ParseFloat(stepSize, 8)
+							if step > 0 {
+								p = int(math.Abs(math.Round(math.Log10(step))))
+							}
+							break
+						}
+					}
+					return p
+				}
+
 				for _, s := range exchangeInfo.Symbols {
 					if s.Symbol == t.From+t.To {
+						p := getPrecision(s)
 						orderService = client.NewCreateOrderService().
 							Symbol(s.Symbol).
 							Side(binance.SideTypeSell).
 							Type("MARKET").
-							Quantity(strconv.FormatFloat(t.Amount, 'f', 8, 64))
+							Quantity(strconv.FormatFloat(t.Amount, 'f', p, 64))
 						break
 					}
 					if s.Symbol == t.To+t.From {
+						p := getPrecision(s)
 						orderService = client.NewCreateOrderService().
 							Symbol(s.Symbol).
 							Side(binance.SideTypeBuy).
 							Type("MARKET").
-							QuoteOrderQty(strconv.FormatFloat(t.Amount, 'f', 8, 64))
+							QuoteOrderQty(strconv.FormatFloat(t.Amount, 'f', p, 64))
 						break
 					}
 				}
@@ -181,13 +200,15 @@ func main() {
 				log.Println("skipping not configured balance update", bu.Asset, bu.Change)
 				return
 			}
-			to := strings.ToUpper(config.SellAll[asset])
-			log.Println("trading balance update", bu.Change, bu.Asset, "to", to)
-
-			tj <- &tradeJob{
-				From:   bu.Asset,
-				To:     to,
-				Amount: change,
+			log.Println("balance updated:", bu.Change, bu.Asset)
+			for to, percent := range config.SellAll[asset] {
+				to = strings.ToUpper(to)
+				log.Printf("trading %f%% of %s to %s", percent, bu.Asset, to)
+				tj <- &tradeJob{
+					From:   bu.Asset,
+					To:     to,
+					Amount: change / 100 * percent,
+				}
 			}
 		}
 

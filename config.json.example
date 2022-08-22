@@ -2,7 +2,11 @@
   "api_key": "",
   "secret_key": "",
   "sell_all": {
-    "eth": "usdt",
-    "rvn": "etc"
+    "eth": {
+      "usdt": 100,
+    }
+    "rvn": {
+      "etc": 50
+    }
   }
 }
