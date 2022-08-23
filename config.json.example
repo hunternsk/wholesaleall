@@ -1,6 +1,8 @@
 {
   "api_key": "",
   "secret_key": "",
+  "bot_token": "",
+  "bot_chat_id": "",
   "sell_all": {
     "eth": {
       "usdt": 100,

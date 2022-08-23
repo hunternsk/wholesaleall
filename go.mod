@@ -1,10 +1,11 @@
 module github.com/hunternsk/wholesaleall
 
-go 1.19
+go 1.18
 
 require (
 	github.com/adshao/go-binance/v2 v2.3.8
 	github.com/davecgh/go-spew v1.1.1
+	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
 )
 
 require (

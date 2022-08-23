@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"github.com/adshao/go-binance/v2"
 	"github.com/davecgh/go-spew/spew"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"log"
 	"math"
 	"os"
@@ -18,6 +20,8 @@ import (
 type configType struct {
 	APIKey    string                        `json:"api_key"`
 	SecretKey string                        `json:"secret_key"`
+	BotToken  string                        `json:"bot_token"`
+	BotChatId int64                         `json:"bot_chat_id"`
 	SellAll   map[string]map[string]float64 `json:"sell_all"`
 }
 
@@ -73,6 +77,59 @@ func main() {
 
 	ctx := context.Background()
 
+	//tg
+	var bot *tgbotapi.BotAPI
+	if len(config.BotToken) > 0 {
+		bot, err = tgbotapi.NewBotAPI(config.BotToken)
+		if err != nil {
+			log.Println("tg bot error", err)
+		}
+	}
+	tm := make(chan string)
+	go func(tm chan string) {
+		for {
+			select {
+			case m := <-tm:
+				if bot != nil && config.BotChatId > 0 {
+					msg := tgbotapi.NewMessage(config.BotChatId, m)
+					_, _ = bot.Send(msg)
+				}
+			}
+		}
+	}(tm)
+
+	logAll := func(m string) {
+		tm <- m
+		log.Println(m)
+	}
+
+	if bot != nil {
+		go func() {
+			log.Printf("tg authorized on account %s", bot.Self.UserName)
+
+			u := tgbotapi.NewUpdate(0)
+			u.Timeout = 60
+
+			updates := bot.GetUpdatesChan(u)
+
+			for update := range updates {
+				if update.Message != nil { // If we got a message
+					if config.BotChatId > 0 && update.Message.From.ID != config.BotChatId {
+						return
+					}
+					log.Printf("[%s] %v %s", update.Message.From.UserName, update.Message.From.ID, update.Message.Text)
+
+					msg := tgbotapi.NewMessage(update.Message.Chat.ID, update.Message.Text)
+					msg.ReplyToMessageID = update.Message.MessageID
+
+					_, _ = bot.Send(msg)
+				}
+			}
+		}()
+	}
+	tm <- "Bot started"
+
+	//binance
 	client := binance.NewClient(config.APIKey, config.SecretKey)
 	client.Debug = *debug
 
@@ -154,9 +211,9 @@ func main() {
 						log.Println("res.CummulativeQuoteQuantity parse error", err)
 						return
 					}
-					log.Println("executed", res.Symbol, res.Side, quoteQuantity)
+					logAll(fmt.Sprintln("executed", res.Symbol, res.Side, quoteQuantity))
 					if t.CrossJob != nil {
-						log.Println("crossjob:", t.CrossJob, "trading")
+						logAll(fmt.Sprintln("crossjob:", t.CrossJob, "trading"))
 						go func() {
 							tj <- &tradeJob{
 								From:     "USDT",
@@ -200,10 +257,11 @@ func main() {
 				log.Println("skipping not configured balance update", bu.Asset, bu.Change)
 				return
 			}
-			log.Println("balance updated:", bu.Change, bu.Asset)
+			logAll(fmt.Sprintln("balance updated:", bu.Change, bu.Asset))
 			for to, percent := range config.SellAll[asset] {
 				to = strings.ToUpper(to)
-				log.Printf("trading %f%% of %s to %s", percent, bu.Asset, to)
+				logAll(fmt.Sprintf("trading %f%% of %s to %s", percent, bu.Asset, to))
+
 				tj <- &tradeJob{
 					From:   bu.Asset,
 					To:     to,
@@ -217,6 +275,7 @@ func main() {
 	errHandler := func(err error) {
 		log.Println(err)
 	}
+	log.Println("starting binance user data handler")
 	doneC, _, err := binance.WsUserDataServe(listenKey, wsHandler, errHandler)
 	if err != nil {
 		log.Println(err)
