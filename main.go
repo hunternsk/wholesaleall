@@ -117,9 +117,10 @@ func main() {
 					if config.BotChatId > 0 && update.Message.From.ID != config.BotChatId {
 						return
 					}
-					log.Printf("[%s] %v %s", update.Message.From.UserName, update.Message.From.ID, update.Message.Text)
+					msgText := fmt.Sprintf("[%s] %v %s", update.Message.From.UserName, update.Message.From.ID, update.Message.Text)
+					log.Println(msgText)
 
-					msg := tgbotapi.NewMessage(update.Message.Chat.ID, update.Message.Text)
+					msg := tgbotapi.NewMessage(update.Message.Chat.ID, msgText)
 					msg.ReplyToMessageID = update.Message.MessageID
 
 					_, _ = bot.Send(msg)
