@@ -240,6 +240,8 @@ func main() {
 		}
 	}(tj)
 
+	errCount := 0
+	errMax := 3
 	wsHandler := func(e *binance.WsUserDataEvent) {
 		//spew.Dump(e)
 		if e.Event == "balanceUpdate" {
@@ -275,12 +277,22 @@ func main() {
 
 	errHandler := func(err error) {
 		log.Println(err)
+		errCount++
+		time.Sleep(time.Second * 3)
 	}
-	log.Println("starting binance user data handler")
-	doneC, _, err := binance.WsUserDataServe(listenKey, wsHandler, errHandler)
-	if err != nil {
-		log.Println(err)
-		return
+	for {
+		log.Println("starting binance user data handler")
+		doneC, _, err := binance.WsUserDataServe(listenKey, wsHandler, errHandler)
+		if err != nil {
+			log.Println(err)
+			if errCount == errMax {
+				return
+			}
+			go func() { //Error cleanup
+				time.Sleep(time.Minute * 15)
+				errCount = 0
+			}()
+		}
+		<-doneC
 	}
-	<-doneC
 }
