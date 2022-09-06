@@ -39,7 +39,7 @@ var (
 	config = configType{
 		APIKey:    "",
 		SecretKey: "",
-		SellAll:   map[string]map[string]float64{"eth": {"usdt": 100}},
+		SellAll:   map[string]map[string]float64{},
 	}
 )
 
